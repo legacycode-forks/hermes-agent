@@ -28,41 +28,10 @@ from tools.skill_usage import _read_skill_name, read_suppressed_names
 from tools.skills_sync_optional import (
     _backfill_optional_provenance, _ignore_runtime_cache, _is_runtime_cache, _read_hub_install_paths,
 )
-from utils import atomic_write_text
+from utils import atomic_write_text, copyfile_owner_writable, copytree_owner_writable, make_tree_owner_writable
 
 logger = logging.getLogger(__name__)
 
-
-def _ensure_owner_writable(path: Path) -> None:
-    """Grant owner-write without following copied symlinks."""
-    if path.is_symlink():
-        return
-    try:
-        os.chmod(path, stat.S_IMODE(os.stat(path).st_mode) | stat.S_IWUSR)
-    except OSError as exc:
-        logger.debug("chmod on %s failed: %s", path, exc)
-
-
-def _copy_file_writable(src, dst) -> None:
-    """Copy metadata and make the destination owner-writable."""
-    shutil.copy2(src, dst)
-    _ensure_owner_writable(Path(dst))
-
-
-def _make_tree_owner_writable(root: Path) -> None:
-    """Make an existing copied tree owner-writable without chmod-ing links."""
-    if not root.exists():
-        return
-    _ensure_owner_writable(root)
-    for path in root.rglob("*"):
-        _ensure_owner_writable(path)
-
-
-def _copytree_writable(src, dst, **kwargs) -> None:
-    """Copy a tree and restore owner-write bits inherited from immutable sources."""
-    kwargs.setdefault("copy_function", _copy_file_writable)
-    shutil.copytree(src, dst, **kwargs)
-    _make_tree_owner_writable(Path(dst))
 
 HERMES_HOME = get_hermes_home()
 SKILLS_DIR = HERMES_HOME / "skills"
@@ -218,7 +187,7 @@ def _move_dir(src: Path, dest: Path) -> None:
 
 def _copy_dir(src: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _copytree_writable(src, dest, ignore=_ignore_runtime_cache)
+    copytree_owner_writable(src, dest, ignore=_ignore_runtime_cache)
 
 
 def _recover_renamed_skill(st: "_SyncState", skill_name: str, dest: Path) -> Optional[str]:
@@ -334,7 +303,7 @@ def _replace_skill_dir(skill_src: Path, dest: Path) -> None:
         _rmtree_writable(backup)
     shutil.move(str(dest), str(backup))
     try:
-        _copytree_writable(skill_src, dest, ignore=_ignore_runtime_cache)
+        copytree_owner_writable(skill_src, dest, ignore=_ignore_runtime_cache)
     except OSError:
         if backup.exists():  # clear a partially-written dest so it can't shadow/block the restore
             if dest.exists():
@@ -356,14 +325,14 @@ def _update_existing_skill(st: _SyncState, skill_name: str, skill_src: Path, des
     """Handle a skill that is in the manifest AND on disk."""
     origin_hash = st.manifest.get(skill_name, "")
     if origin_hash and bundled_hash == origin_hash:  # bundled unchanged: repair pre-fix copies in place
-        _make_tree_owner_writable(dest)
+        make_tree_owner_writable(dest)
         st.skipped += 1
         return
     user_hash = _dir_hash(dest)
     if not origin_hash:  # v1 migration: baseline from user's copy (can't tell edit from upstream)
         st.manifest[skill_name] = user_hash
         if user_hash == bundled_hash:
-            _make_tree_owner_writable(dest)
+            make_tree_owner_writable(dest)
         st.skipped += 1
         return
     if not _matches_origin_hash(dest, origin_hash, user_hash):
@@ -390,7 +359,7 @@ def _seed_category_descriptions(bundled_dir: Path, only_dirs: Optional[Set[Path]
             continue
         try:
             dest_desc.parent.mkdir(parents=True, exist_ok=True)
-            _copy_file_writable(desc_md, dest_desc)
+            copyfile_owner_writable(desc_md, dest_desc)
         except OSError as e:
             logger.debug("Could not copy %s: %s", desc_md, e)
 

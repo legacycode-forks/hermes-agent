@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 from agent.skill_utils import is_excluded_skill_path
 from hermes_cli.archive_safe import archive_root_dirs, make_targz, normalize_archive_parts, safe_extract_targz
 from hermes_constants import clear_named_profile_deleted, mark_named_profile_deleted, named_profile_is_deleted
+from utils import copytree_owner_writable
 
 logger = logging.getLogger(__name__)
 
@@ -775,8 +776,7 @@ def _clone_file(source_dir: Path, profile_dir: Path, relpath: str) -> None:
 def _clone_all_into(source_dir: Path, profile_dir: Path, canon: str) -> None:
     """--clone-all: full copytree minus infrastructure/history, then strip runtime files
     and cloned single-use OAuth grants."""
-    from tools.skills_sync import _copytree_writable
-    _copytree_writable(source_dir, profile_dir, symlinks=True, ignore=_clone_all_copytree_ignore(source_dir))
+    copytree_owner_writable(source_dir, profile_dir, symlinks=True, ignore=_clone_all_copytree_ignore(source_dir))
     for stale in _CLONE_ALL_STRIP:
         (profile_dir / stale).unlink(missing_ok=True)
     # auth.json / .anthropic_oauth.json copied verbatim fork single-use OAuth grants
@@ -806,8 +806,7 @@ def _bootstrap_profile_dir(profile_dir: Path, source_dir: Optional[Path]) -> Non
         _clone_file(source_dir, profile_dir, relpath)
     source_skills = source_dir / "skills"
     if source_skills.is_dir():
-        from tools.skills_sync import _copytree_writable
-        _copytree_writable(source_skills, profile_dir / "skills", symlinks=True, dirs_exist_ok=True)
+        copytree_owner_writable(source_skills, profile_dir / "skills", symlinks=True, dirs_exist_ok=True)
     for relpath in _CLONE_SUBDIR_FILES:
         _clone_file(source_dir, profile_dir, relpath)
 

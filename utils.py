@@ -35,6 +35,40 @@ def env_var_enabled(name: str, default: str = "") -> bool:
     return is_truthy_value(os.getenv(name, default), default=False)
 
 
+def ensure_owner_writable(path: Union[str, Path]) -> None:
+    """Best-effort grant of owner-write without following symlinks."""
+    destination = Path(path)
+    if destination.is_symlink():
+        return
+    try:
+        os.chmod(destination, stat.S_IMODE(os.stat(destination).st_mode) | stat.S_IWUSR)
+    except OSError as exc:
+        logger.debug("chmod on %s failed: %s", destination, exc)
+
+
+def make_tree_owner_writable(root: Union[str, Path]) -> None:
+    """Best-effort make a copied tree editable without chmod-ing symlink targets."""
+    destination = Path(root)
+    if not destination.exists():
+        return
+    ensure_owner_writable(destination)
+    for path in destination.rglob("*"):
+        ensure_owner_writable(path)
+
+
+def copyfile_owner_writable(src: Union[str, Path], dst: Union[str, Path]) -> None:
+    """Copy file metadata, then ensure the destination is owner-writable."""
+    shutil.copy2(src, dst)
+    ensure_owner_writable(dst)
+
+
+def copytree_owner_writable(src: Union[str, Path], dst: Union[str, Path], **kwargs: Any) -> None:
+    """Copy a tree, making copied entries editable without following symlinks."""
+    kwargs.setdefault("copy_function", copyfile_owner_writable)
+    shutil.copytree(src, dst, **kwargs)
+    make_tree_owner_writable(dst)
+
+
 def _preserve_file_mode(path: Path) -> "int | None":
     """Permission bits of *path* if it exists, else ``None``."""
     try:

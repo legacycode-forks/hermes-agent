@@ -10,6 +10,8 @@ mocking git would just test the mock.
 
 from __future__ import annotations
 
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -229,6 +231,28 @@ class TestInstall:
         m = read_manifest(plan.target_dir)
         assert m.name == "installed"
         assert m.source == str(staged)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits not enforced")
+    def test_install_makes_readonly_distribution_payload_editable(self, profile_env):
+        staged = _make_staging_dir(profile_env, "readonly")
+        skill_dir = staged / "skills" / "demo"
+        skill_file = skill_dir / "SKILL.md"
+        os.chmod(skill_file, 0o444)
+        os.chmod(skill_dir, 0o555)
+        os.chmod(staged / "skills", 0o555)
+
+        try:
+            plan = install_distribution(str(staged), name="readonly")
+            installed_file = plan.target_dir / "skills" / "demo" / "SKILL.md"
+
+            assert stat.S_IMODE(installed_file.stat().st_mode) & stat.S_IWUSR
+            assert stat.S_IMODE(installed_file.parent.stat().st_mode) & stat.S_IWUSR
+            installed_file.write_text("edited\n")
+            assert installed_file.read_text() == "edited\n"
+        finally:
+            os.chmod(skill_file, 0o644)
+            os.chmod(skill_dir, 0o755)
+            os.chmod(staged / "skills", 0o755)
 
     def test_install_respects_distribution_owned_allowlist(self, profile_env):
         """Install must only copy paths listed in distribution_owned."""

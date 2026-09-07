@@ -9,11 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.skills_sync import (
-    _copy_file_writable,
-    _copytree_writable,
-    _ensure_owner_writable,
     _get_bundled_dir,
-    _make_tree_owner_writable,
     _read_manifest,
     _read_skill_name,
     _write_manifest,
@@ -22,6 +18,7 @@ from tools.skills_sync import (
     _dir_hash,
     sync_skills,
 )
+from utils import copyfile_owner_writable, copytree_owner_writable, ensure_owner_writable, make_tree_owner_writable
 from tools.skills_sync_bundled_ops import reset_bundled_skill
 from tools.skills_sync_optional import restore_official_optional_skill
 
@@ -704,7 +701,7 @@ class TestEnsureOwnerWritable:
 
     def test_handles_missing_path(self, tmp_path):
         # Should not raise on missing path
-        _ensure_owner_writable(tmp_path / "does-not-exist")
+        ensure_owner_writable(tmp_path / "does-not-exist")
 
     def test_grants_user_write_to_readonly_file(self, tmp_path):
         import os
@@ -714,7 +711,7 @@ class TestEnsureOwnerWritable:
         f.write_text("x")
         os.chmod(f, 0o444)  # mimic Nix store mode
 
-        _ensure_owner_writable(f)
+        ensure_owner_writable(f)
 
         assert os.stat(f).st_mode & stat_mod.S_IWUSR
 
@@ -726,7 +723,7 @@ class TestEnsureOwnerWritable:
         script.write_text("#!/bin/sh\n")
         os.chmod(script, 0o555)  # executable, read-only — Nix-store-style
 
-        _ensure_owner_writable(script)
+        ensure_owner_writable(script)
 
         m = stat_mod.S_IMODE(os.stat(script).st_mode)
         assert m & stat_mod.S_IWUSR
@@ -740,7 +737,7 @@ class TestEnsureOwnerWritable:
         f.write_text("x")
         before = os.stat(f).st_mode
 
-        _ensure_owner_writable(f)
+        ensure_owner_writable(f)
 
         # Same or only the (already-set) user-write bit changed
         after = os.stat(f).st_mode
@@ -748,7 +745,7 @@ class TestEnsureOwnerWritable:
 
 
 class TestCopyFileWritable:
-    """``_copy_file_writable`` is the ``copy_function`` for copytree, plus a
+    """``copyfile_owner_writable`` is the ``copy_function`` for copytree, plus a
     drop-in replacement for ``shutil.copy2``."""
 
     def test_readonly_source_yields_writable_destination(self, tmp_path):
@@ -760,7 +757,7 @@ class TestCopyFileWritable:
         src.write_text("hello")
         os.chmod(src, 0o444)
 
-        _copy_file_writable(src, dst)
+        copyfile_owner_writable(src, dst)
 
         assert dst.read_text() == "hello"
         assert os.stat(dst).st_mode & stat_mod.S_IWUSR
@@ -774,7 +771,7 @@ class TestCopyFileWritable:
         src.write_text("#!/bin/sh\n")
         os.chmod(src, 0o555)
 
-        _copy_file_writable(src, dst)
+        copyfile_owner_writable(src, dst)
 
         m = stat_mod.S_IMODE(os.stat(dst).st_mode)
         assert m & stat_mod.S_IWUSR
@@ -782,7 +779,7 @@ class TestCopyFileWritable:
 
 
 class TestMakeTreeOwnerWritable:
-    """``_make_tree_owner_writable`` walks an existing tree and grants the
+    """``make_tree_owner_writable`` walks an existing tree and grants the
     owner-write bit to every entry."""
 
     def test_grants_user_write_to_all_descendants(self, tmp_path):
@@ -801,7 +798,7 @@ class TestMakeTreeOwnerWritable:
         os.chmod(tmp_path, 0o555)
 
         try:
-            _make_tree_owner_writable(tmp_path)
+            make_tree_owner_writable(tmp_path)
 
             assert os.stat(tmp_path).st_mode & stat_mod.S_IWUSR
             assert os.stat(sub).st_mode & stat_mod.S_IWUSR
@@ -817,11 +814,11 @@ class TestMakeTreeOwnerWritable:
 
     def test_handles_missing_root(self, tmp_path):
         # No-op on missing path
-        _make_tree_owner_writable(tmp_path / "ghost")
+        make_tree_owner_writable(tmp_path / "ghost")
 
 
 class TestCopytreeWritable:
-    """End-to-end: ``_copytree_writable`` produces a fully editable copy of
+    """End-to-end: ``copytree_owner_writable`` produces a fully editable copy of
     a read-only source tree."""
 
     def test_readonly_source_tree_yields_editable_destination(self, tmp_path):
@@ -840,7 +837,7 @@ class TestCopytreeWritable:
 
         dst = tmp_path / "dst"
         try:
-            _copytree_writable(src, dst)
+            copytree_owner_writable(src, dst)
 
             sk = dst / "category" / "skill-x" / "SKILL.md"
             assert sk.exists()
@@ -916,7 +913,7 @@ class TestSyncSkillsReadOnlyBundledSource:
             assert user_skill.exists()
             assert os.stat(user_skill).st_mode & stat_mod.S_IWUSR, (
                 "User copy of bundled skill must be writable after sync; see "
-                "tools.skills_sync._copytree_writable"
+                "tools.skills_sync.copytree_owner_writable"
             )
             # skill_manage emulation: append must succeed.
             with user_skill.open("a") as fh:
